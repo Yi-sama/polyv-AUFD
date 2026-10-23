@@ -1,0 +1,53 @@
+@import "tailwindcss";
+@import "@fontsource/instrument-serif/400.css";
+@import "@fontsource/instrument-serif/400-italic.css";
+
+@theme {
+  --color-wall: #f4f1ea;
+  --color-ink: #16150f;
+  --color-muted: #6f6b60;
+  --color-line: #dcd7cb;
+  --color-dark: #0d0d0b;
+  --font-sans: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif;
+  --font-serif: "Instrument Serif", "Songti SC", "STSong", serif;
+}
+
+html {
+  background: var(--color-wall);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  /* 聚焦时锁定滚动不会让版面横移，避免共享过渡错位 */
+  scrollbar-gutter: stable;
+}
+
+::selection {
+  background: var(--color-ink);
+  color: var(--color-wall);
+}
+
+:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 4px;
+}
+
+/* 编号、拉丁名等展签用字 */
+.label-num {
+  font-family: var(--font-serif);
+  font-feature-settings: "lnum";
+}
+
+/* 聚焦视图的界面在作品飞入后出现 */
+@keyframes chrome-in {
+  from { opacity: 0; }
+}
+.chrome-in {
+  animation: chrome-in 0.4s 0.3s ease-out both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .chrome-in { animation: none; }
+}
+
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { scrollbar-width: none; }

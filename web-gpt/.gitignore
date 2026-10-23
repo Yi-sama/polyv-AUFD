@@ -1,0 +1,8 @@
+node_modules/
+dist/
+*.tsbuildinfo
+output/
+.env.local
+.playwright-cli/
+vite-out.log
+vite-error.log

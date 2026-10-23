@@ -1,0 +1,25 @@
+import { chromium } from 'playwright-core'
+const b = await chromium.launch({ channel: 'msedge' })
+const p = await b.newPage({ viewport: { width: 1440, height: 900 } })
+await p.goto('http://127.0.0.1:5173/liurunsen?mock')
+await p.waitForTimeout(1200)
+await p.mouse.wheel(0, 700)
+await p.waitForTimeout(800)
+const state = (label) =>
+  p.evaluate((label) => {
+    const f = document.getElementById('hang-demo-film')
+    const b = f.getBoundingClientRect()
+    return { label, y: scrollY, left: Math.round(b.left), offsetLeft: f.offsetLeft, op: f.offsetParent?.className.slice(0, 30), tf: document.querySelector('section .w-max').style.transform, stickyScroll: document.querySelector('section > div').scrollLeft }
+  }, label)
+console.log(await state('scrolled'))
+await p.click('#work-type-study')
+await p.waitForTimeout(900)
+await p.keyboard.press('ArrowLeft')
+await p.waitForTimeout(600)
+console.log(await state('focused prev'))
+await p.keyboard.press('Escape')
+await p.waitForTimeout(100)
+console.log(await state('100ms after close'))
+await p.waitForTimeout(1200)
+console.log(await state('1.3s after close'))
+await b.close()
