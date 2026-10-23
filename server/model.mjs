@@ -1,8 +1,10 @@
-export const SLUG = 'liurunsen';
+export const SLUG = 'lin-mo';
+export const SLUG_PATTERN = /^[a-z0-9-]{2,40}$/;
+export const RESERVED_SLUGS = new Set(['api', 'assets', 'uploads', 'join', 'login', 'logout', 'studio', 'auth', 'tags', 'liurunsen']);
 export const DEMO_VID = '88083abbf5bcf1356e05d39666be527a_8';
-export const POSTER = '/assets/poster.jpg';
+export const POSTER = '/assets/samples/architecture.jpg';
 export const VID_PATTERN = /^[a-zA-Z0-9_-]{5,100}$/;
-export const IMAGE_PATTERN = /^\/(?:assets\/poster\.jpg|uploads\/[a-f0-9-]{36}\.webp)$/;
+export const IMAGE_PATTERN = /^\/(?:assets\/samples\/[a-z0-9-]+\.(?:jpg|webp)|uploads\/[a-f0-9-]{36}\.webp)$/;
 
 export class ApiError extends Error {
   constructor(status, code, message, extra = {}) {
@@ -13,28 +15,72 @@ export class ApiError extends Error {
 
 export function seedPortfolio() {
   return {
-    slug: SLUG, revision: 0,
+    slug: SLUG, revision: 0, channel: 1, isSample: true,
     profile: {
-      name: '刘润森', alias: 'Yisama', role: '创作者',
-      bio: '把想法做成可以被看见的作品。',
-      about: '这里收集我的海报、照片与影像。这段简介为演示文案，可在编辑页修改。',
-      email: '', cover: POSTER, avatar: POSTER, updatedAt: '2026-10-23'
+      name: '林墨', alias: 'Lin Mo', role: '空间摄影',
+      title: '空间摄影', tags: ['摄影', '建筑'],
+      bio: '示例大咖：观察空间、光线与城市结构。',
+      about: '虚构示例人物。照片为授权图库素材，不代表本人作品、肖像或真实经历。',
+      email: '', contact: '', cover: POSTER, avatar: POSTER, updatedAt: '2026-10-24'
     },
     works: [
       {
-        id: 'aufd', type: 'poster', title: 'AUFD，让作品被看见',
-        subtitle: '参赛海报', date: '2026-10-23',
-        description: '一张记录创作起点的海报。海报署名：刘润森 Yisama、王健 Soulmate。',
+        id: 'space', type: 'photo', title: '空间观察',
+        subtitle: '图库示例', date: '',
+        description: '示例摄影作品。图片来源和作者见素材 SOURCES.md。',
         cover: POSTER, images: [POSTER], featured: true, videoId: '', isDemo: false, highlights: []
       },
       {
         id: 'polyv-demo', type: 'video', title: '保利威播放器接入演示',
         subtitle: '官方示例，非个人作品', date: '',
-        description: '目前使用保利威官方示例视频占位，封面沿用参赛海报。准备个人视频后可替换 VID。',
+        description: '保利威官方示例视频，不代表比赛账号已接入。',
         cover: POSTER, images: [], featured: false, videoId: DEMO_VID, isDemo: true,
         highlights: [{ title: '开始播放', seconds: 0 }]
       }
     ]
+  };
+}
+
+export function seedCreators() {
+  const first = seedPortfolio();
+  const definitions = [
+    [SLUG, '林墨', 'Lin Mo', '空间摄影', ['摄影', '建筑'], ['architecture', 'facade', 'structure']],
+    ['chen-yu', '陈语', 'Chen Yu', '职业教育', ['职业教育', '沟通'], ['workshop', 'conversation', 'audience']],
+    ['zhou-ning', '周宁', 'Zhou Ning', '直播培训', ['直播', '企业培训'], ['stage', 'panel', 'workshop']]
+  ];
+  return definitions.map(([slug, name, alias, title, tags, images], index) => {
+    const cover = `/assets/samples/${images[0]}.jpg`;
+    return {
+      slug, revision: 0, channel: index + 1, isSample: true,
+      profile: {
+        ...first.profile, name, alias, role: title, title, tags, avatar: cover, cover,
+        bio: `示例大咖：${title}。人物与经历均为虚构。`
+      },
+      works: [
+        ...images.map((image, i) => ({
+          ...first.works[0], id: `${slug}-${i + 1}`, title: `${title} · ${i + 1}`,
+          cover: `/assets/samples/${image}.jpg`, images: [`/assets/samples/${image}.jpg`],
+          featured: i === 0
+        })),
+        ...(index === 0 ? [first.works[1]] : [])
+      ]
+    };
+  });
+}
+
+export function validateSlug(slug) {
+  if (typeof slug !== 'string' || !SLUG_PATTERN.test(slug) || RESERVED_SLUGS.has(slug)) invalid('创作者标识');
+  return slug;
+}
+
+export function emptyCreator(slug, name, channel) {
+  const p = seedPortfolio();
+  return {
+    slug, revision: 0, channel, isSample: false, works: [],
+    profile: {
+      ...p.profile, name, alias: '', title: '', role: '', tags: [], bio: '', about: '',
+      avatar: '', cover: '', updatedAt: new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date())
+    }
   };
 }
 
@@ -51,17 +97,23 @@ function image(value) {
   return value;
 }
 
-export function validatePortfolio(input) {
+export function validatePortfolio(input, slug = SLUG) {
+  validateSlug(slug);
   if (!object(input) || !Number.isSafeInteger(input.revision) || input.revision < 0 ||
       input.revision === Number.MAX_SAFE_INTEGER || !object(input.profile) ||
       !Array.isArray(input.works) || input.works.length > 40) invalid('作品集');
-  if (input.slug !== undefined && input.slug !== SLUG) invalid('创作者标识');
+  if (input.slug !== undefined && input.slug !== slug) invalid('创作者标识');
   const p = input.profile;
+  const title = text(p.title ?? p.role ?? '', '身份', 80);
+  const tags = p.tags ?? [];
+  if (!Array.isArray(tags) || tags.length > 5) invalid('领域');
   const profile = {
-    name: text(p.name, '姓名', 40, true), alias: text(p.alias, '别名', 40),
-    role: text(p.role, '身份', 80), bio: text(p.bio, '简介', 300),
-    about: text(p.about, '关于', 2000), email: text(p.email, '邮箱', 120),
-    avatar: image(p.avatar), cover: image(p.cover ?? p.avatar),
+    name: text(p.name, '姓名', 40, true), alias: text(p.alias ?? '', '别名', 40),
+    role: title, title, tags: [...new Set(tags.map(t => text(t, '领域', 30, true)))], bio: text(p.bio ?? '', '简介', 300),
+    about: text(p.about ?? '', '关于', 2000), email: text(p.email ?? '', '邮箱', 120),
+    contact: text(p.contact ?? p.email ?? '', '联系方式', 200),
+    avatar: p.avatar === '' ? '' : image(p.avatar),
+    cover: (p.cover ?? p.avatar) === '' ? '' : image(p.cover ?? p.avatar),
     updatedAt: new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date())
   };
   if (profile.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(profile.email)) invalid('邮箱');
@@ -86,8 +138,10 @@ export function validatePortfolio(input) {
       subtitle: text(w.subtitle, '副标题', 160), date,
       description: text(w.description, '作品说明', 6000),
       cover: image(w.cover), images: w.images.map(image), featured: w.featured,
-      videoId, isDemo: videoId === DEMO_VID, highlights
+      videoId, isDemo: w.type === 'video' && videoId === DEMO_VID,
+      duration: w.type === 'video' && Number.isFinite(w.duration) && w.duration >= 0 && w.duration <= 86400 ? w.duration : null,
+      highlights
     };
   });
-  return { slug: SLUG, revision: input.revision, profile, works };
+  return { slug, revision: input.revision, profile, works };
 }

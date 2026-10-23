@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, writeFile, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,7 +10,8 @@ import sharp from 'sharp';
 import { createApp } from './app.mjs';
 import { createStore } from './store.mjs';
 import { createPolyv, signSearch, signToken } from './polyv.mjs';
-import { DEMO_VID, seedPortfolio, validatePortfolio } from './model.mjs';
+import { DEMO_VID, SLUG, POSTER, seedPortfolio, validatePortfolio } from './model.mjs';
+import { createSessions } from './auth.mjs';
 import { loadConfig } from './config.mjs';
 import { checkAccount } from './check-polyv.mjs';
 
@@ -32,16 +33,25 @@ async function running(t, overrides = {}) {
   await new Promise(resolve => app.listen(0, '127.0.0.1', resolve));
   t.after(() => new Promise(resolve => app.close(resolve)));
   const base = `http://127.0.0.1:${app.address().port}`;
+  let cookie = '';
   async function api(route, { json, headers = {}, ...options } = {}) {
     const res = await fetch(base + route, {
       ...options,
-      headers: { Origin: 'http://localhost:5173', ...(json === undefined ? {} : { 'Content-Type': 'application/json' }), ...headers },
+      headers: { Origin: 'http://localhost:5173', Cookie: cookie, ...(json === undefined ? {} : { 'Content-Type': 'application/json' }), ...headers },
       ...(json === undefined ? {} : { body: JSON.stringify(json) })
     });
     const content = res.headers.get('content-type')?.includes('application/json') ? await res.json() : await res.arrayBuffer();
     return { res, content };
   }
-  return { api, base, dataDir, app };
+  async function login(slug = SLUG) {
+    const credentials = JSON.parse(await readFile(path.join(dataDir, 'creators', slug, 'demo-login.local.json'), 'utf8'));
+    const result = await api('/api/auth/login', { method: 'POST', json: credentials });
+    assert.equal(result.res.status, 200);
+    cookie = result.res.headers.get('set-cookie').split(';')[0];
+    return result;
+  }
+  if (overrides.authenticated !== false) await login();
+  return { api, base, dataDir, app, login };
 }
 function upstreamVideo({ encrypted = false, status = 61, vid = ownVid } = {}) {
   return {
@@ -58,13 +68,15 @@ function upstreamVideo({ encrypted = false, status = 61, vid = ownVid } = {}) {
 test('public document, creator aliases, poster dimensions and HEAD', async t => {
   const { api } = await running(t);
   const { content: p } = await api('/api/portfolio');
-  assert.equal(p.profile.name, '刘润森');
-  assert.equal(p.works.length, 2);
-  assert.deepEqual(p.media['/assets/poster.jpg'], { width: 1280, height: 2276 });
-  assert.deepEqual((await api('/api/creators/liurunsen')).content, p);
-  assert.equal((await api('/api/creators')).content.items.length, 1);
+  assert.equal(p.profile.name, '林墨');
+  assert.equal(p.works.length, 4);
+  assert.ok(p.media[POSTER].width > 0 && p.media[POSTER].height > 0);
+  assert.deepEqual((await api(`/api/creators/${SLUG}`)).content, p);
+  assert.equal((await api('/api/creators')).content.items.length, 3);
+  assert.equal((await api('/api/creators/liurunsen')).res.status, 404);
+  assert.equal((await api('/assets/poster.jpg')).res.status, 404);
   assert.equal((await api('/api/creators/other')).res.status, 404);
-  const image = await api('/assets/poster.jpg', { method: 'HEAD' });
+  const image = await api(POSTER, { method: 'HEAD' });
   assert.equal(image.res.status, 200);
   assert.ok(Number(image.res.headers.get('content-length')) > 0);
   assert.equal(image.content.byteLength, 0);
@@ -76,12 +88,12 @@ test('atomic save, concurrent revision conflict and restart persistence', async 
   p.profile.bio = 'Updated';
   const results = await Promise.all([
     api('/api/portfolio', { method: 'PUT', json: p }),
-    api('/api/creators/liurunsen', { method: 'PUT', json: p })
+    api(`/api/creators/${SLUG}`, { method: 'PUT', json: p })
   ]);
   assert.deepEqual(results.map(r => r.res.status).sort(), [200, 409]);
   const conflict = results.find(r => r.res.status === 409);
   assert.equal(conflict.content.code, 'REVISION_CONFLICT');
-  const disk = JSON.parse(await readFile(path.join(dataDir, 'portfolio.json'), 'utf8'));
+  const disk = JSON.parse(await readFile(path.join(dataDir, 'creators', SLUG, 'creator.json'), 'utf8'));
   assert.equal(disk.revision, 1);
   assert.equal(disk.profile.bio, 'Updated');
   const restarted = await createStore(dataDir, assetDir);
@@ -96,7 +108,7 @@ test('failed write never advances revision or overwrites previous content', asyn
   p.works[0].cover = '/uploads/00000000-0000-0000-0000-000000000000.webp';
   await assert.rejects(store.save(p), { code: 'IMAGE_MISSING' });
   assert.equal((await store.read()).revision, 0);
-  assert.equal(JSON.parse(await readFile(path.join(dir, 'portfolio.json'), 'utf8')).revision, 0);
+  assert.equal(JSON.parse(await readFile(path.join(dir, 'creators', SLUG, 'creator.json'), 'utf8')).revision, 0);
 });
 
 test('validation rejects unsafe types, duplicate IDs, impossible dates and missing video IDs', () => {
@@ -158,11 +170,11 @@ test('read-only mode blocks management but not anonymous portfolio or sample pla
   assert.equal(token.content.reason, 'official-demo');
 });
 
-test('configured admin credential is required even from loopback', async t => {
+test('legacy admin credential never bypasses user authentication', async t => {
   const token = 'test-admin-token-with-at-least-32-characters';
-  const { api } = await running(t, { env: { ADMIN_TOKEN: token } });
-  assert.equal((await api('/api/portfolio', { method: 'PUT', json: seedPortfolio() })).res.status, 403);
-  assert.equal((await api('/api/portfolio', { method: 'PUT', json: seedPortfolio(), headers: { Authorization: `Bearer ${token}` } })).res.status, 200);
+  const { api } = await running(t, { env: { ADMIN_TOKEN: token }, authenticated: false });
+  assert.equal((await api('/api/portfolio', { method: 'PUT', json: seedPortfolio() })).res.status, 401);
+  assert.equal((await api('/api/portfolio', { method: 'PUT', json: seedPortfolio(), headers: { Authorization: `Bearer ${token}` } })).res.status, 401);
   await assert.rejects(createApp({ dataDir: await temporary(t), assetDir, env: { HOST: '0.0.0.0' } }), /CONFIG_INVALID/);
 });
 
@@ -230,11 +242,15 @@ test('external env overrides template defaults but not explicit process environm
 
 test('a corrupt existing portfolio is not reset to seed data', async t => {
   const dir = await temporary(t);
-  await mkdir(dir, { recursive: true });
-  const target = path.join(dir, 'portfolio.json');
+  await createStore(dir, assetDir);
+  const target = path.join(dir, 'creators', SLUG, 'creator.json');
   await writeFile(target, '{broken', 'utf8');
   await assert.rejects(createStore(dir, assetDir), /DATA_INVALID/);
   assert.equal(await readFile(target, 'utf8'), '{broken');
+  const missingSlug = seedPortfolio();
+  delete missingSlug.slug;
+  await writeFile(target, JSON.stringify(missingSlug), 'utf8');
+  await assert.rejects(createStore(dir, assetDir), /DATA_INVALID/);
 });
 
 test('search SHA1 and token MD5 use different raw-value signing rules', () => {
@@ -313,7 +329,7 @@ test('public token endpoint cannot mint arbitrary account video tokens', async t
   assert.equal((await api(`/api/polyv/play-token?vid=${ownVid}`)).res.status, 404);
   assert.equal(calls, 0);
   const p = (await api('/api/portfolio')).content;
-  p.works[1].videoId = ownVid;
+  p.works.find(w => w.type === 'video').videoId = ownVid;
   assert.equal((await api('/api/portfolio', { method: 'PUT', json: p })).res.status, 200);
   const response = await api(`/api/polyv/play-token?vid=${ownVid}`);
   assert.equal(response.res.status, 200);
@@ -350,4 +366,219 @@ test('account diagnostic separates empty library, exact VID readiness and actual
   await assert.rejects(checkAccount({ ...env, POLYV_TEST_VID: 'not a VID' }, () => { throw new Error('should not call'); }), {
     code: 'POLYV_TEST_VID_INVALID'
   });
+});
+
+test('anonymous reads stay public but all management routes require a session', async t => {
+  const { api } = await running(t, { authenticated: false });
+  assert.equal((await api('/api/creators')).res.status, 200);
+  assert.equal((await api('/api/auth/me')).res.status, 401);
+  assert.equal((await api('/api/portfolio', { method: 'PUT', json: seedPortfolio() })).res.status, 401);
+  assert.equal((await api('/api/upload', { method: 'POST' })).res.status, 401);
+  assert.equal((await api('/api/uploads', { method: 'POST' })).res.status, 401);
+  assert.equal((await api('/api/polyv/videos')).res.status, 401);
+  const invalid = await api('/api/auth/login', { method: 'POST', json: { slug: SLUG, password: 'wrong-password' } });
+  const absent = await api('/api/auth/login', { method: 'POST', json: { slug: 'absent', password: 'wrong-password' } });
+  assert.equal(invalid.res.status, 401);
+  assert.deepEqual(invalid.content, absent.content);
+});
+
+test('owner session is required even with forged document ownership or admin headers', async t => {
+  const { api, login } = await running(t);
+  const other = (await api('/api/creators/chen-yu')).content;
+  const original = structuredClone(other);
+  other.profile.bio = 'forbidden';
+  assert.equal((await api('/api/creators/chen-yu', { method: 'PUT', json: other })).res.status, 403);
+  other.slug = SLUG;
+  assert.equal((await api('/api/creators/chen-yu', { method: 'PUT', json: other })).res.status, 403);
+  assert.deepEqual((await api('/api/creators/chen-yu')).content, original);
+  const own = (await api('/api/portfolio')).content;
+  own.channel = 999;
+  own.isSample = false;
+  own.profile.bio = 'Owner update';
+  const saved = await api('/api/portfolio', { method: 'PUT', json: own });
+  assert.equal(saved.res.status, 200);
+  assert.equal(saved.content.channel, 1);
+  assert.equal(saved.content.isSample, true);
+  assert.equal(saved.content.profile.bio, 'Owner update');
+  await login('chen-yu');
+  original.profile.bio = 'Second owner';
+  assert.equal((await api('/api/creators/chen-yu', { method: 'PUT', json: original })).res.status, 200);
+  assert.equal((await api('/api/portfolio')).content.revision, 1);
+  assert.equal((await api('/api/creators/chen-yu')).content.revision, 1);
+});
+
+test('join creates an empty independent creator, salts passwords and survives restart', async t => {
+  const { api, dataDir } = await running(t, { authenticated: false });
+  const input = { slug: 'new-creator', name: 'New Creator', password: 'a-strong-test-password' };
+  const joined = await api('/api/auth/join', { method: 'POST', json: input });
+  assert.equal(joined.res.status, 201, JSON.stringify(joined.content));
+  const p = joined.content.creator;
+  assert.equal(p.channel, 4);
+  assert.equal(p.revision, 0);
+  assert.equal(p.isSample, false);
+  assert.deepEqual(p.works, []);
+  assert.deepEqual(p.media, {});
+  const cookie = joined.res.headers.get('set-cookie');
+  assert.match(cookie, /HttpOnly/);
+  assert.match(cookie, /SameSite=Lax/);
+  const headers = { Cookie: cookie.split(';')[0] };
+  assert.equal((await api('/api/auth/me', { headers })).content.creator.slug, input.slug);
+  p.profile.bio = 'Saved empty creator';
+  assert.equal((await api(`/api/creators/${input.slug}`, { method: 'PUT', json: p, headers })).res.status, 200);
+  assert.equal((await api('/api/auth/join', { method: 'POST', json: input })).res.status, 409);
+  const second = await api('/api/auth/join', { method: 'POST', json: { ...input, slug: 'another-creator' } });
+  assert.equal(second.content.creator.channel, 5);
+  const account = JSON.parse(await readFile(path.join(dataDir, 'creators', input.slug, 'account.json'), 'utf8'));
+  const other = JSON.parse(await readFile(path.join(dataDir, 'creators', 'another-creator', 'account.json'), 'utf8'));
+  assert.notEqual(account.salt, other.salt);
+  assert.notEqual(account.hash, other.hash);
+  assert.equal(JSON.stringify(account).includes(input.password), false);
+  const restarted = await createStore(dataDir, assetDir);
+  assert.equal((await restarted.login(input.slug, input.password)).revision, 1);
+  assert.equal((await restarted.read(input.slug)).channel, 4);
+  await assert.rejects(restarted.login(input.slug, 'wrong-password'), { status: 401 });
+  for (const route of ['/api/creators', `/api/creators/${input.slug}`, '/api/tags', '/api/auth/me']) {
+    const body = JSON.stringify((await api(route, { headers })).content);
+    for (const secret of [account.salt, account.hash, input.password, '"password"', '"hash"', '"salt"']) {
+      assert.equal(body.includes(secret), false, route);
+    }
+  }
+  for (const route of ['/data/creators/new-creator/account.json', '/creators/new-creator/account.json', '/data/creators/lin-mo/demo-login.local.json']) {
+    assert.equal((await api(route)).res.status, 404);
+  }
+});
+
+test('invalid registration is bounded and reserved routes cannot be claimed', async t => {
+  const { api } = await running(t, { authenticated: false });
+  for (const slug of ['../escape', 'UPPER', 'x', 'a'.repeat(41), 'studio', 'liurunsen', 'api']) {
+    const result = await api('/api/auth/join', { method: 'POST', json: { slug, name: 'Test', password: 'password-123' } });
+    assert.equal(result.res.status, 400, slug);
+  }
+  for (const password of ['', 'short', 'a'.repeat(129)]) {
+    assert.equal((await api('/api/auth/join', { method: 'POST', json: { slug: 'valid-user', name: 'Test', password } })).res.status, 400);
+  }
+  assert.equal((await api('/api/auth/join', { method: 'POST', json: null })).res.status, 400);
+  assert.equal((await api('/api/creators')).content.items.length, 3);
+});
+
+test('logout invalidates tokens, sessions expire, rotation invalidates previous token', async t => {
+  const { api, login } = await running(t);
+  const logged = await login();
+  const old = logged.res.headers.get('set-cookie').split(';')[0];
+  await login();
+  assert.equal((await api('/api/auth/me', { headers: { Cookie: old } })).res.status, 401);
+  assert.equal((await api('/api/auth/logout', { method: 'POST' })).res.status, 200);
+  assert.equal((await api('/api/auth/me')).res.status, 401);
+  assert.equal((await api('/api/upload', { method: 'POST' })).res.status, 401);
+  let now = 0, issued;
+  const sessions = createSessions({ secure: true, now: () => now });
+  const req = { headers: {} };
+  sessions.issue(req, { setHeader: (_, value) => { issued = value; } }, SLUG);
+  assert.match(issued, /; Secure/);
+  req.headers.cookie = issued.split(';')[0];
+  assert.equal(sessions.require(req), SLUG);
+  now = 12 * 60 * 60 * 1000;
+  assert.throws(() => sessions.require(req), { status: 401 });
+});
+
+test('creator index supports channels, previews, search and exact tags without private identity', async t => {
+  const { api } = await running(t, { authenticated: false });
+  const items = (await api('/api/creators')).content.items;
+  assert.deepEqual(items.map(p => p.channel), [1, 2, 3]);
+  for (const item of items) {
+    assert.equal(item.isSample, true);
+    assert.equal(item.worksCount, 3);
+    assert.ok(item.previews.length >= 3 && item.previews.length <= 6);
+    assert.ok(item.previews.every(p => p.width > 0 && p.height > 0));
+    assert.equal(item.previews[0].workId, item.featured.id);
+  }
+  assert.equal(items[0].previewVideo.videoId, DEMO_VID);
+  assert.equal(items[0].previewVideo.isDemo, true);
+  assert.equal(items[1].previewVideo, null);
+  assert.equal((await api('/api/creators?q=LIN%20MO')).content.items.length, 1);
+  assert.equal((await api(`/api/creators?q=${encodeURIComponent('职业教育')}`)).content.items[0].slug, 'chen-yu');
+  assert.equal((await api(`/api/creators?tag=${encodeURIComponent('摄影')}`)).content.items.length, 1);
+  assert.equal((await api(`/api/creators?tag=${encodeURIComponent('摄')}`)).content.items.length, 0);
+  assert.equal((await api('/api/tags')).content.items.find(i => i.tag === '摄影').count, 1);
+  const serialized = JSON.stringify(items);
+  for (const privateIdentity of ['liurunsen', '刘润森', 'Yisama', '/assets/poster.jpg']) assert.equal(serialized.includes(privateIdentity), false);
+});
+
+test('legacy personal portfolio is never imported or rewritten', async t => {
+  const dataDir = await temporary(t);
+  const legacy = JSON.stringify({ slug: 'liurunsen', profile: { name: '刘润森' }, revision: 7 });
+  await writeFile(path.join(dataDir, 'portfolio.json'), legacy, 'utf8');
+  const store = await createStore(dataDir, assetDir);
+  assert.equal((await store.list()).length, 3);
+  assert.throws(() => store.read('liurunsen'), { status: 404 });
+  assert.equal(await readFile(path.join(dataDir, 'portfolio.json'), 'utf8'), legacy);
+});
+
+test('published video membership spans creators but excludes nonvideo VID fields', async t => {
+  const store = await createStore(await temporary(t), assetDir);
+  const p = await store.read('chen-yu');
+  p.works[0].videoId = ownVid;
+  await store.save(p, p.slug);
+  assert.equal(store.hasVideo(ownVid), false);
+  const next = await store.read(p.slug);
+  next.works.push({ ...seedPortfolio().works[1], videoId: ownVid });
+  await store.save(next, next.slug);
+  assert.equal(store.hasVideo(ownVid), true);
+});
+
+test('auth rate limit bounds repeated failures and cross-site auth is rejected', async t => {
+  const { api } = await running(t, { authenticated: false });
+  const json = { slug: SLUG, password: 'wrong-password' };
+  assert.equal((await api('/api/auth/login', { method: 'POST', json, headers: { Origin: 'https://evil.example' } })).res.status, 403);
+  assert.equal((await api('/api/auth/logout', { method: 'POST', headers: { Origin: 'https://evil.example' } })).res.status, 403);
+  for (let i = 0; i < 30; i++) assert.equal((await api('/api/auth/login', { method: 'POST', json })).res.status, 401);
+  assert.equal((await api('/api/auth/login', { method: 'POST', json })).res.status, 429);
+});
+
+test('selected Polyv video saves its verified cover locally with real dimensions', async t => {
+  const image = await sharp({ create: { width: 20, height: 10, channels: 3, background: '#102030' } }).png().toBuffer();
+  const downloads = [];
+  const { api } = await running(t, { env, fetchImpl: async (url, options) => {
+    if (String(url).includes('/search-videos')) {
+      assert.equal(new URL(url).searchParams.get('title'), ownVid);
+      return Response.json(upstreamVideo());
+    }
+    downloads.push(String(url));
+    assert.equal(options.redirect, 'error');
+    return new Response(image, { headers: { 'Content-Type': 'image/png' } });
+  } });
+  const p = (await api('/api/portfolio')).content;
+  const video = p.works.find(w => w.type === 'video');
+  video.videoId = ownVid;
+  video.cover = 'https://img.videocc.net/test.jpg';
+  const saved = await api('/api/portfolio', { method: 'PUT', json: p });
+  assert.equal(saved.res.status, 200, JSON.stringify(saved.content));
+  const result = saved.content.works.find(w => w.type === 'video');
+  assert.match(result.cover, /^\/uploads\/[a-f0-9-]+\.webp$/);
+  assert.deepEqual(saved.content.media[result.cover], { width: 20, height: 10 });
+  assert.equal(result.duration, 12);
+  assert.equal(result.isDemo, false);
+  assert.deepEqual(downloads, ['https://img.videocc.net/test.jpg']);
+  assert.equal((await api('/api/portfolio', { method: 'PUT', json: p })).res.status, 409);
+  assert.equal(downloads.length, 1);
+});
+
+test('remote video covers never become an arbitrary URL fetch or bypass ownership', async t => {
+  let calls = 0;
+  const { api } = await running(t, { env, fetchImpl: async url => {
+    calls++;
+    assert.ok(String(url).startsWith('https://api.polyv.net/v2/video/search-videos?'));
+    return Response.json(upstreamVideo());
+  } });
+  for (const cover of ['http://127.0.0.1/private', 'https://evil.example/a.jpg', 'https://img.videocc.net:8443/test.jpg']) {
+    const p = (await api('/api/portfolio')).content;
+    Object.assign(p.works.find(w => w.type === 'video'), { videoId: ownVid, cover });
+    assert.equal((await api('/api/portfolio', { method: 'PUT', json: p })).res.status, 400);
+    assert.equal((await api('/api/portfolio')).content.revision, 0);
+  }
+  assert.equal(calls, 3);
+  const other = (await api('/api/creators/chen-yu')).content;
+  other.works.push({ ...seedPortfolio().works[1], videoId: ownVid, cover: 'https://img.videocc.net/test.jpg' });
+  assert.equal((await api('/api/creators/chen-yu', { method: 'PUT', json: other })).res.status, 403);
+  assert.equal(calls, 3);
 });

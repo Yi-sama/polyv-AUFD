@@ -1,7 +1,127 @@
-# Shared Backend Contract v1
+# Shared Backend Contract v2.2
 
-Owner: backend chat. Both frontends use this contract. The earlier `api.md`
-draft is retained; this document resolves its open questions.
+Owner: backend chat. Updated 2026-10-24. These v2.2 sections supersede every
+conflicting v1 section archived below. No frontend files are owned by this chat.
+
+Latest user correction: do not use the user as a creator. Bundled public
+creators are fictional and `isSample:true`. The original personal document and
+poster are not imported or served. Do not describe Liu Runsen as a real creator.
+
+## v2.2 Authentication
+
+| Method | Path | JSON body | Success |
+|---|---|---|---|
+| POST | `/api/auth/join` | `{slug,name,password}` | 201 `{creator: Creator}` |
+| POST | `/api/auth/login` | `{slug,password}` | 200 `{creator: Creator}` |
+| POST | `/api/auth/logout` | none | 200 `{ok:true}` |
+| GET | `/api/auth/me` | none | 200 `{creator: Creator}` |
+
+- `/api/auth/me` logged out: **401 `AUTH_REQUIRED`**, not `{creator:null}`.
+- Slug is immutable, lowercase `/^[a-z0-9-]{2,40}$/`; route names and
+  `liurunsen` are reserved. Duplicate slug: 409 `SLUG_EXISTS`.
+- Password: 8..128 chars, salted scrypt; no account fields in public responses.
+- Login and join set `aufd_session`: HttpOnly, SameSite=Lax, Path=/, 12 hours,
+  Secure when HTTPS PUBLIC_ORIGIN is configured.
+- Login rotates current session; logout revokes it. Restart invalidates sessions.
+- Fetch relative URLs with `credentials:'include'`; Vite `changeOrigin:true`,
+  `xfwd:false`. Forwarded headers are not trusted.
+- Wrong or missing account: identical 401 `INVALID_CREDENTIALS`.
+- Authentication limited to 30 attempts per peer IP per five minutes and four
+  concurrent password operations. Sessions are in memory, one backend process.
+- Neither loopback nor legacy ADMIN_TOKEN grants edit access anymore.
+- Public binding requires HTTPS PUBLIC_ORIGIN and HTTPS reverse proxy.
+- READ_ONLY blocks joins, saves, uploads and account-library search.
+- Example passwords are generated randomly and saved ONLY in ignored
+  `server/data/creators/<slug>/demo-login.local.json`; do not put in frontend.
+
+## v2.2 Public Data
+
+```ts
+interface Creator {
+  slug: string; channel: number; revision: number; isSample: boolean;
+  profile: {
+    name: string; alias: string; title: string; role: string;
+    tags: string[]; bio: string; about: string; contact: string; email: string;
+    avatar: string; cover: string; updatedAt: string;
+  };
+  works: Work[];
+  media: Record<string, {width: number; height: number}>;
+}
+interface CreatorSummary {
+  slug: string; channel: number; isSample: boolean; profile: Creator['profile'];
+  worksCount: number; // excludes official-demo video works
+  featured: Work | null; // legacy compatibility
+  previews: {workId:string; type:Work['type']; cover:string; width:number; height:number}[];
+  previewVideo: {workId:string; videoId:string; seconds:number; isDemo:boolean} | null;
+}
+```
+
+- `GET /api/creators?q=&tag=`: `{items:CreatorSummary[]}`, channel ascending.
+  q matches name/alias/title case-insensitively, <=100 chars. tag is an exact
+  field tag, <=30 chars. Filters combine.
+- `GET /api/creators/:slug`: full Creator, or 404.
+- `GET /api/tags`: `{items:{tag:string,count:number}[]}` over all creators.
+  Count each creator once per tag.
+- `GET /api/portfolio`: compatibility alias for **lin-mo**, not the user.
+- Seeds: `lin-mo` channel 1, photography; `chen-yu` channel 2, education;
+  `zhou-ning` channel 3, live-video training. Each has three illustrative photos;
+  lin-mo also has an explicitly official demo video.
+- All seed names and biographies are fictional. Scene images, not impersonated
+  portraits, serve as avatars. Credits: `server/assets/samples/SOURCES.md`.
+- Join creates an empty public page, channel 4 onward, works=[], empty
+  avatar/cover and media={}. Channel never changes during save.
+- `previews`: <=6, featured first then nonfeatured, stable work order.
+- `previewVideo`: first video in work order, first highlight seconds or 0.
+- `role` mirrors `title`. New clients use title/contact; email is optional.
+- Work is as below, with optional `duration:number|null` in seconds for videos.
+- Images and cover dimensions are derived from real files.
+
+## v2.2 Owner Writes
+
+`PUT /api/creators/:slug` with `{revision,profile,works}`.
+The `/api/portfolio` alias has the same checks.
+
+- Anonymous: 401. Another creator: **403 `OWNER_REQUIRED`**, regardless of body.
+- Own save: 200 full Creator, independent revision increment.
+- Stale/concurrent save: 409 `REVISION_CONFLICT` with currentRevision.
+- slug/channel/isSample/media/updatedAt/isDemo are server-owned.
+- Optional profile strings default empty; tags <=5 distinct values.
+- Avatar/cover may be empty for a new page. Nonempty paths must exist.
+- Existing image/upload, work, date and highlight limits below remain in effect.
+- `POST /api/upload`, `/api/uploads`, `GET /api/polyv/videos` require login.
+- `GET /api/polyv/play-token` accepts a VID only when present on a saved
+  **video** work of any creator. Nonvideo VID fields do not authorize tokens.
+- Polyv is a shared competition-account library, not per-user credentials.
+- For a video selected from the library, PUT accepts its exact remote Polyv
+  cover URL, verifies the VID belongs to the account and is published, downloads
+  only that verified cover (approved Polyv hosts, no redirects, <=10 MiB), and
+  normalizes it through the regular image pipeline. The saved response contains
+  a local cover plus dimensions and video duration. Frontend replaces its draft
+  with this response. Other remote image URLs remain invalid.
+- Official demos are not proof of actual competition-account playback.
+
+## v2.2 Images And Storage
+
+- Valid images: `/assets/samples/<name>.jpg`, `/assets/samples/<name>.webp`,
+  `/uploads/<uuid>.webp`. GET/HEAD supported. No arbitrary remote URLs.
+- **`/assets/poster.jpg` and `/api/creators/liurunsen` return 404.**
+- `data/creators/<slug>/creator.json`: public document.
+- `data/creators/<slug>/account.json`: private salted scrypt hash.
+- Creation atomically renames a directory containing both account and document.
+- Save atomically renames one document; existing corrupt data stops startup.
+- Legacy `data/portfolio.json` is left untouched, not imported or served.
+- Keep the data directory backed up; no public routes for private files.
+- Tests use isolated temporary data and mocked Polyv. Actual browser/owned-video
+  verification is recorded separately in `docs/progress/2026-10-24.md`.
+- Response errors remain `{error,code,currentRevision?}`; 401 added for sessions.
+- Port stays 127.0.0.1:4317; `/api`, `/assets`, `/uploads` unchanged.
+
+---
+
+# Archived v1 (Historical, Superseded By v2.2 Above)
+
+The following is retained as history for image and Polyv details. Its single-user,
+loopback/admin, original-poster and old storage assumptions DO NOT apply.
 
 ## Connection
 

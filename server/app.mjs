@@ -1,18 +1,14 @@
 import http from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
-import { timingSafeEqual } from 'node:crypto';
 import Busboy from 'busboy';
-import { ApiError, DEMO_VID, SLUG, IMAGE_PATTERN, VID_PATTERN } from './model.mjs';
+import { ApiError, DEMO_VID, SLUG, POSTER, IMAGE_PATTERN, VID_PATTERN, validatePortfolio } from './model.mjs';
 import { createStore } from './store.mjs';
 import { createPolyv } from './polyv.mjs';
+import { createSessions } from './auth.mjs';
 
 const MAX_IMAGE = 10 * 1024 * 1024;
 const loopback = host => ['127.0.0.1', 'localhost', '::1', '[::1]', '::ffff:127.0.0.1'].includes(host);
 const fail = (status, code, message) => { throw new ApiError(status, code, message); };
-function safeEqual(a, b) {
-  const x = Buffer.from(a), y = Buffer.from(b);
-  return x.length === y.length && timingSafeEqual(x, y);
-}
 function json(res, status, data) {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
   res.end(JSON.stringify(data));
@@ -89,9 +85,6 @@ export async function createApp({
 }) {
   const readOnly = env.READ_ONLY === 'true';
   const host = env.HOST || '127.0.0.1';
-  const adminToken = env.ADMIN_TOKEN || '';
-  if (adminToken && adminToken.length < 32) throw new Error('CONFIG_INVALID: ADMIN_TOKEN must have at least 32 characters.');
-  if (!loopback(host) && !readOnly && !adminToken) throw new Error('CONFIG_INVALID: Public binding requires READ_ONLY=true or ADMIN_TOKEN.');
   let publicOrigin = '';
   if (env.PUBLIC_ORIGIN) {
     const parsed = new URL(env.PUBLIC_ORIGIN);
@@ -109,17 +102,22 @@ export async function createApp({
       return url.origin === origin && url.protocol === 'http:' && loopback(url.hostname);
     } catch { return false; }
   }
-  function authorize(req) {
-    if (readOnly) fail(403, 'READ_ONLY', '公开展示模式不允许编辑或查询账号素材');
+  function checkOrigin(req) {
+    if (Object.keys(req.headers).some(h => h === 'forwarded' || h.startsWith('x-forwarded-'))) {
+      fail(403, 'FORWARDED_DENIED', '请使用不添加转发头的同源代理');
+    }
     if (req.headers.origin && !allowedOrigin(req.headers.origin)) fail(403, 'ORIGIN_DENIED', '不允许的请求来源');
     if (req.headers['sec-fetch-site'] === 'cross-site' && !allowedOrigin(req.headers.origin)) {
       fail(403, 'ORIGIN_DENIED', '不允许的请求来源');
     }
-    if (adminToken) {
-      if (!safeEqual(req.headers.authorization ?? '', `Bearer ${adminToken}`)) fail(403, 'ADMIN_REQUIRED', '需要管理凭证');
-    } else if (!loopback(req.socket.remoteAddress) || Object.keys(req.headers).some(h => h === 'forwarded' || h.startsWith('x-forwarded-'))) {
-      fail(403, 'LOCAL_ONLY', '编辑功能仅供本机使用');
-    }
+  }
+  const sessions = createSessions({ secure: Boolean(publicOrigin) });
+  function authorize(req, slug) {
+    if (readOnly) fail(403, 'READ_ONLY', '公开展示模式不允许编辑或查询账号素材');
+    checkOrigin(req);
+    const owner = sessions.require(req);
+    if (slug !== undefined && owner !== slug) fail(403, 'OWNER_REQUIRED', '只能编辑自己的主页');
+    return owner;
   }
   const store = await createStore(dataDir, assetDir);
   const polyv = createPolyv(env, fetchImpl);
@@ -144,6 +142,7 @@ export async function createApp({
       if (!hosts.includes(requestHost)) fail(403, 'HOST_DENIED', '不允许的访问地址');
       if (req.headers.origin && allowedOrigin(req.headers.origin)) {
         res.setHeader('Access-Control-Allow-Origin', req.headers.origin);
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
         res.setHeader('Vary', 'Origin');
       }
       if (req.method === 'OPTIONS') {
@@ -159,18 +158,67 @@ export async function createApp({
       if (pathname === '/api/health' && req.method === 'GET') {
         return json(res, 200, { status: 'ok', readOnly, polyvConfigured: polyv.configured });
       }
-      if (pathname === '/api/portfolio' || pathname === `/api/creators/${SLUG}`) {
-        if (req.method === 'GET') return json(res, 200, await store.read());
+      if (pathname === '/api/auth/join' && req.method === 'POST') {
+        if (readOnly) fail(403, 'READ_ONLY', '公开展示模式不允许入驻');
+        checkOrigin(req);
+        const input = await jsonBody(req, 8192);
+        const creator = await sessions.limited(req, () => store.join(input));
+        sessions.issue(req, res, creator.slug);
+        return json(res, 201, { creator });
+      }
+      if (pathname === '/api/auth/login' && req.method === 'POST') {
+        checkOrigin(req);
+        const input = await jsonBody(req, 8192);
+        const creator = await sessions.limited(req, () => store.login(input?.slug, input?.password));
+        sessions.issue(req, res, creator.slug);
+        return json(res, 200, { creator });
+      }
+      if (pathname === '/api/auth/logout' && req.method === 'POST') {
+        checkOrigin(req);
+        sessions.logout(req, res);
+        return json(res, 200, { ok: true });
+      }
+      if (pathname === '/api/auth/me' && req.method === 'GET') {
+        return json(res, 200, { creator: await store.read(sessions.require(req)) });
+      }
+      const creatorMatch = /^\/api\/creators\/([a-z0-9-]{2,40})$/.exec(pathname);
+      if (pathname === '/api/portfolio' || creatorMatch) {
+        const slug = creatorMatch?.[1] ?? SLUG;
+        if (req.method === 'GET') return json(res, 200, await store.read(slug));
         if (req.method === 'PUT') {
-          authorize(req);
-          return json(res, 200, await store.save(await jsonBody(req)));
+          authorize(req, slug);
+          const input = await jsonBody(req);
+          const remoteCover = w => w?.type === 'video' && typeof w.cover === 'string' && /^https?:\/\//.test(w.cover);
+          const pending = Array.isArray(input?.works) ? input.works.filter(remoteCover) : [];
+          if (pending.length) {
+            // Validate all ordinary fields before contacting the account or fetching media.
+            validatePortfolio({ ...input, works: input.works.map(w => remoteCover(w) ? { ...w, cover: POSTER } : w) }, slug);
+            const current = await store.read(slug);
+            if (input.revision !== current.revision) {
+              throw new ApiError(409, 'REVISION_CONFLICT', '内容已更新，请重新加载并合并修改', { currentRevision: current.revision });
+            }
+            if (uploads >= 2) fail(429, 'UPLOAD_BUSY', '正在处理其他图片，请稍后再试');
+            uploads++;
+            try {
+              for (const work of pending) {
+                const cover = await polyvCall(() => polyv.cover(work.videoId, work.cover));
+                work.cover = (await store.upload(cover.bytes, cover.mime)).url;
+                work.duration = cover.duration;
+              }
+            } finally { uploads--; }
+          }
+          return json(res, 200, await store.save(input, slug));
         }
         fail(405, 'METHOD_NOT_ALLOWED', '不支持的操作');
       }
       if (pathname === '/api/creators' && req.method === 'GET') {
-        const p = await store.read();
-        const { name, alias, role, avatar } = p.profile;
-        return json(res, 200, { items: [{ slug: SLUG, profile: { name, alias, role, avatar }, featured: p.works.find(w => w.featured) ?? null }] });
+        const q = (url.searchParams.get('q') ?? '').trim();
+        const tag = (url.searchParams.get('tag') ?? '').trim();
+        if (q.length > 100 || tag.length > 30) fail(400, 'INVALID_QUERY', '搜索条件不正确');
+        return json(res, 200, { items: await store.list({ q, tag }) });
+      }
+      if (pathname === '/api/tags' && req.method === 'GET') {
+        return json(res, 200, { items: store.tags() });
       }
       if (['/api/upload', '/api/uploads'].includes(pathname) && req.method === 'POST') {
         authorize(req);

@@ -2,6 +2,28 @@
 
 ## Current Status
 
+- 2026-10-24 v2.2 supersedes the historical single-creator decisions below.
+  Active contract: `docs/backend-api.md` v2.2; product correction at top of
+  `docs/product-direction.md`. User is NOT a public creator. Public samples are
+  fictional lin-mo, chen-yu and zhou-ning, channels 1..3.
+- Repository: `https://github.com/Yi-sama/polyv-AUFD`, branch main.
+  First source baseline 44e6704 pushed; env/data/uploads/logs ignored.
+- Backend now enforces user-session ownership, including local requests.
+  ADMIN_TOKEN is obsolete and never bypasses ownership. Cookie sessions expire
+  after 12h and on server restart. Fetch with credentials; proxy without xfwd.
+- New durable data: `server/data/creators/<slug>/creator.json` and private
+  `account.json`. Seed login credentials are local-only
+  `demo-login.local.json` beside the account. Never commit or expose these.
+- Legacy personal portfolio.json is deliberately retained but not imported or
+  served. The old personal slug and `/assets/poster.jpg` return 404.
+- Shared Polyv library was checked again and is empty. API access verified;
+  owned-video upload/playback/highlight seeking remain unverified.
+- Backend v2 was started on 4317, PID 24376 observed at 04:34 local time.
+  Isolated suite 32/32; live direct and 5174 proxy auth/ownership/image checks pass.
+  Claude owns and is actively editing web-gpt; do not stage/revert those files.
+
+### Historical v1 Status (Superseded)
+
 - 2026-10-23: shared backend implemented in `server/`.
 - GPT and Claude own independent frontend directories. This backend task did not edit them.
 - Contract: `docs/backend-api.md`; earlier frontend `docs/api.md` draft retained with an addendum.

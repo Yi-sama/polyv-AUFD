@@ -1,5 +1,13 @@
 # Portfolio Backend
 
+> v2.2 (2026-10-24): the active contract is `../docs/backend-api.md`.
+> This is now a multi-creator backend with owner-only Cookie sessions, fictional
+> examples, channels and discovery. Loopback/ADMIN_TOKEN no longer authorize
+> editing. The original personal portfolio/poster are not public.
+> Private example passwords: `data/creators/<slug>/demo-login.local.json`.
+> Public documents and private accounts live separately under `data/creators/`.
+> The older single-creator notes below are historical; v2.2 overrides them.
+
 Shared backend for both frontend prototypes. The executable API contract is
 `../docs/backend-api.md`. No changes to `web/` or `web-gpt/` are required here.
 

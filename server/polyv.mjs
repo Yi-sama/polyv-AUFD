@@ -20,7 +20,7 @@ function previewUrl(value) {
   try {
     const url = new URL(value);
     const allowed = ['videocc.net', 'polyv.net'].some(host => url.hostname === host || url.hostname.endsWith(`.${host}`));
-    return allowed && ['https:', 'http:'].includes(url.protocol) && !url.username && !url.password
+    return allowed && ['https:', 'http:'].includes(url.protocol) && !url.username && !url.password && !url.port
       ? url.href.replace(/^http:/, 'https:') : '';
   } catch { return ''; }
 }
@@ -85,13 +85,42 @@ export function createPolyv(env = process.env, fetchImpl = fetch) {
     url.search = new URLSearchParams({ ...params, sign: signSearch(params, secret) }).toString();
     return normalizeSearch(await request(url));
   }
+  async function ownedVideo(videoId) {
+    // Polyv documents "title" as title-or-VID fuzzy search; still require an exact VID match.
+    const result = await search({ keyword: videoId, pageSize: 50 });
+    const video = result.items.find(v => v.videoId === videoId);
+    if (!video) throw new ApiError(404, 'POLYV_VIDEO_NOT_FOUND', '当前账号中未找到这个视频');
+    if (!video.playable) throw new ApiError(409, 'POLYV_VIDEO_NOT_READY', '视频尚未转码或审核完成');
+    return video;
+  }
   return {
     configured, search,
+    async cover(videoId, requestedUrl) {
+      const video = await ownedVideo(videoId);
+      if (!video.cover || previewUrl(requestedUrl) !== video.cover) {
+        throw new ApiError(400, 'POLYV_COVER_INVALID', '封面必须来自所选保利威视频');
+      }
+      let response;
+      const chunks = [];
+      let size = 0;
+      try {
+        response = await fetchImpl(video.cover, { redirect: 'error', signal: AbortSignal.timeout(15000) });
+        if (!response.ok || !response.body) throw new Error('Invalid response');
+        const max = 10 * 1024 * 1024;
+        if (Number(response.headers.get('content-length')) > max) throw new Error('Cover too large');
+        for await (const chunk of response.body) {
+          size += chunk.length;
+          if (size > max) throw new Error('Cover too large');
+          chunks.push(chunk);
+        }
+      } catch {
+        if (response?.body && !response.body.locked) await response.body.cancel().catch(() => {});
+        throw new ApiError(502, 'POLYV_COVER_FAILED', '视频封面下载失败，请上传本地封面');
+      }
+      return { bytes: Buffer.concat(chunks), mime: response.headers.get('content-type')?.split(';')[0], duration: video.duration };
+    },
     async playback(videoId) {
-      const result = await search({ keyword: videoId, pageSize: 50 });
-      const video = result.items.find(v => v.videoId === videoId);
-      if (!video) throw new ApiError(404, 'POLYV_VIDEO_NOT_FOUND', '当前账号中未找到这个视频');
-      if (!video.playable) throw new ApiError(409, 'POLYV_VIDEO_NOT_READY', '视频尚未转码或审核完成');
+      const video = await ownedVideo(videoId);
       if (video.encrypted === null) throw new ApiError(503, 'POLYV_ENCRYPTION_UNKNOWN', '尚不能确认视频加密状态');
       if (!video.encrypted) return { videoId, token: null, required: false, expiresAt: null, reason: 'unencrypted' };
       const params = {
