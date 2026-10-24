@@ -9,7 +9,7 @@
 > The older single-creator notes below are historical; v2.2 overrides them.
 
 Shared backend for both frontend prototypes. The executable API contract is
-`../docs/backend-api.md`. No changes to `web/` or `web-gpt/` are required here.
+`../docs/backend-api.md`. No changes to `frontend/` are required here.
 
 ## Local Development
 

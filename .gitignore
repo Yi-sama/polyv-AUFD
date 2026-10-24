@@ -18,6 +18,7 @@ cache/
 .playwright-cli/
 output/
 outputs/
+/video/
 *.pem
 *.key
 *.p12

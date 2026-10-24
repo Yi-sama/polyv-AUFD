@@ -1,0 +1,6 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    { "name": "frontend", "url": "http://127.0.0.1:5175", "port": 5175 }
+  ]
+}

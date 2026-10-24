@@ -60,5 +60,5 @@ media: Record<string, { width: number; height: number }>  // key 为图片地址
 
 ## 前端约定
 - 开发时 Vite 把 `/api`、`/uploads`、`/assets` 代理到后端（默认 `http://127.0.0.1:4317`）。
-- 后端接口未就绪前，前端使用 `web/src/data/mock.ts`，结构与本文件一致。
+- 后端接口未就绪前，前端使用 `frontend/src/mock.ts`，结构与本文件一致。
 - 原型对 Host / Origin 有校验，代理需设置 `changeOrigin`；后端请确认放行 Vite 代理的请求。

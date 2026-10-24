@@ -34,7 +34,7 @@
 - Backend is reachable on 4317; current frontend is on 5175. These are local
   development processes, not managed services or a public deployment.
   Isolated suite 32/32; live direct and proxy privacy/playback checks pass.
-  Claude owns and is actively editing web-gpt; do not stage/revert those files.
+  Claude owns and is actively editing frontend; do not stage/revert those files.
 - Final evidence: `docs/progress/2026-10-24-backend-verification.md`.
   Frontend visual acceptance and physical touch-device testing remain separate.
   Earlier v1 observations are retained in the dated progress logs.

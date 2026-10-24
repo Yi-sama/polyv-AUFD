@@ -1,9 +1,9 @@
-# 前端进度（web/，Claude 负责）
+# 前端进度（frontend/，Claude 负责）
 
 更新：2026-10-23 15:10
 
 ## 已完成
-- `web/`：Vite + React + TypeScript + Tailwind + Motion + React Router。
+- `frontend/`：Vite + React + TypeScript + CSS + React Router。
 - `/` 展馆索引：每位创作者一行，名字、身份、作品数和“进入展厅”在同一行，下方是统一高度、横向浏览的作品。
 - `/:slug` 展墙：作品按原始比例不对称悬挂，配展签（编号、标题、类型、年份）；类型多于一种时显示筛选，筛选写入 URL（`?type=video`）；页尾“关于”与邮箱复制。
 - `/:slug/:workId` 聚焦：暗场、上一件 / 下一件（← → 键、手机左右滑）、Esc 关闭、图片点击看原尺寸、多图素材条；竖幅作品桌面端展签在右侧。
@@ -31,4 +31,4 @@
 ```bash
 cd web && npm run dev   # http://127.0.0.1:5173，/api 代理到 127.0.0.1:4317
 ```
-截图：`bash web/scripts/shot.sh <路径> <名称> [宽,高]`，输出到 `.shots/`。
+截图脚本：`node frontend/scripts/shots.mjs`，输出到 `frontend/output/`。

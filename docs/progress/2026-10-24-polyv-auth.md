@@ -63,7 +63,7 @@ does not exist.
 - Updated the product-direction correction, API status notice and project
   memory. The runtime contract stays v2.2; no new endpoint is claimed.
 - Kept current demo behavior and persisted data intact. Did not modify
-  `server/` or Claude's `web-gpt/`, restart services, migrate accounts, invent
+  `server/` or Claude's `frontend/`, restart services, migrate accounts, invent
   OAuth URLs, collect official passwords or replay browser cookies.
 - Did not invoke the reverse SSO APIs: creating a POLYV session would not test
   the required identity direction and would needlessly change external state.
