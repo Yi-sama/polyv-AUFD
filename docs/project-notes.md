@@ -2,6 +2,13 @@
 
 ## Current Status
 
+- Latest authentication target (2026-10-24): the user confirmed reuse of POLYV
+  official management accounts. Current v2.2 login remains a separate local
+  demo, not official SSO. Do not enter official passwords into the demo form.
+  Public backend SSO documentation describes the opposite direction, into
+  POLYV; the external-app identity contract and partner provisioning are still
+  missing. Integration is blocked, not implemented. Investigation and exact
+  partner checklist: `docs/progress/2026-10-24-polyv-auth.md`.
 - 2026-10-24 v2.2 supersedes the historical single-creator decisions.
   Active contract: `docs/backend-api.md` v2.2; product correction at top of
   `docs/product-direction.md`. User is NOT a public creator. Public samples are

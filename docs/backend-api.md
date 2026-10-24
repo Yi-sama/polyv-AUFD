@@ -7,6 +7,20 @@ Latest user correction: do not use the user as a creator. Bundled public
 creators are fictional and `isSample:true`. The original personal document and
 poster are not imported or served. Do not describe Liu Runsen as a real creator.
 
+## Pending Official Identity Integration
+
+User-confirmed target on 2026-10-24: authenticate with the existing POLYV
+official management account, not a second AUFD password. The v2.2 routes below
+still implement local demo credentials only; this note does not change runtime
+behavior or claim a completed migration. Do not submit POLYV passwords to them.
+
+No supported external-app identity callback or verification contract has been
+established. POLYV's documented backend SSO is the reverse direction, into
+POLYV. Do not implement a guessed endpoint, copy official passwords, trust
+caller-supplied slugs as official identity, or treat the video API key as a
+user login. Frontend owner: keep demo login distinct from official login.
+Evidence and required partner inputs: `docs/progress/2026-10-24-polyv-auth.md`.
+
 ## v2.2 Authentication
 
 | Method | Path | JSON body | Success |
