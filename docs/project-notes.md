@@ -2,12 +2,15 @@
 
 ## Current Status
 
-- 2026-10-24 v2.2 supersedes the historical single-creator decisions below.
+- 2026-10-24 v2.2 supersedes the historical single-creator decisions.
   Active contract: `docs/backend-api.md` v2.2; product correction at top of
   `docs/product-direction.md`. User is NOT a public creator. Public samples are
-  fictional lin-mo, chen-yu and zhou-ning, channels 1..3.
+  fictional lin-mo, chen-yu and zhou-ning, channels 1..3. Claude added fictional
+  su-wan, he-tian and jiang-he through join, channels 4..6. Their biographies
+  disclose fictional status; isSample remains false because they joined normally.
 - Repository: `https://github.com/Yi-sama/polyv-AUFD`, branch main.
-  First source baseline 44e6704 pushed; env/data/uploads/logs ignored.
+  Source baseline 44e6704 and backend implementation 4771dd8 pushed;
+  env/data/uploads/logs ignored.
 - Backend now enforces user-session ownership, including local requests.
   ADMIN_TOKEN is obsolete and never bypasses ownership. Cookie sessions expire
   after 12h and on server restart. Fetch with credentials; proxy without xfwd.
@@ -16,28 +19,18 @@
   `demo-login.local.json` beside the account. Never commit or expose these.
 - Legacy personal portfolio.json is deliberately retained but not imported or
   served. The old personal slug and `/assets/poster.jpg` return 404.
-- Shared Polyv library was checked again and is empty. API access verified;
-  owned-video upload/playback/highlight seeking remain unverified.
-- Backend v2 was started on 4317, PID 24376 observed at 04:34 local time.
-  Isolated suite 32/32; live direct and 5174 proxy auth/ownership/image checks pass.
+- Shared Polyv library now contains a published, unencrypted account video:
+  `0cf5cbb2f905e3ac62e97c0c16d1de4e_0`, saved on he-tian as
+  `wmvlj3ttupaw9`. Independent anonymous browser checks verified actual playback
+  and a 2-second highlight seek, followed by normal completion at 5.08 seconds.
+  Earlier empty-library findings are historical, not a current blocker.
+- Backend is reachable on 4317; current frontend is on 5175. These are local
+  development processes, not managed services or a public deployment.
+  Isolated suite 32/32; live direct and proxy privacy/playback checks pass.
   Claude owns and is actively editing web-gpt; do not stage/revert those files.
-
-### Historical v1 Status (Superseded)
-
-- 2026-10-23: shared backend implemented in `server/`.
-- GPT and Claude own independent frontend directories. This backend task did not edit them.
-- Contract: `docs/backend-api.md`; earlier frontend `docs/api.md` draft retained with an addendum.
-- Local server was restarted at `http://127.0.0.1:4317`, process 21372.
-  This is an observation at handoff, not a persistent service manager.
-- Previous process 26016 was no longer present and the port returned ECONNREFUSED.
-  The cause of that exit is unknown; saved data remained at revision 0.
-- Actual HTTP health: `status=ok`, `readOnly=false`, `polyvConfigured=true`.
-- The backend loads the private account environment through local ignored
-  configuration. Secrets are not copied into the project or frontend.
-- Real account configuration is loaded; the account library was previously
-  verified as empty, so no owned playable VID is claimed.
-- Frontend visual acceptance and real account playback remain pending with the
-  frontend owners.
+- Final evidence: `docs/progress/2026-10-24-backend-verification.md`.
+  Frontend visual acceptance and physical touch-device testing remain separate.
+  Earlier v1 observations are retained in the dated progress logs.
 
 ## Environment
 
@@ -45,16 +38,24 @@
 - Run commands in `server/`. Use process-local `NODE_TLS_REJECT_UNAUTHORIZED=1`.
 - `npm ci`, `npm test`, `npm start`, `npm run check:polyv`.
 - Dependency versions are locked. Sharp upgraded to 0.35.5 after an audit finding.
-- No applicable on-disk AGENTS.md or Git repository was found for the desktop project.
-  User-provided operating instructions apply.
+- No applicable on-disk AGENTS.md, root README.md, SPEC.md or LOG-INDEX.md.
+  User-provided operating instructions apply; use `server/README.md`,
+  `docs/product-direction.md`, the active contract and dated progress logs.
+- The supplied `../docs/product-direction.md` does not exist. The actual file
+  is inside the repository at `docs/product-direction.md`.
 
 ## Important Data
 
-- `server/assets/poster.jpg`: original user poster, 1280 x 2276.
-- SHA-256: `473E4C1401E2821309955F3185DF55508F93CBA8787581891D7554C2A0B372A2`.
-- `server/data/portfolio.json`: revisioned public document, initialized at revision 0.
+- `server/data/creators/<slug>/creator.json`: current public document.
+- `account.json` and `demo-login.local.json` beside it: private local account
+  data; never return them through an API or commit them.
 - `server/data/uploads/`: normalized uploaded images; keep with JSON backups.
-- Seed has one genuine poster and one explicitly labeled official sample video.
+- `server/data/portfolio.json` and `server/assets/poster.jpg`: historical
+  personal assets, retained but not imported or served by v2.2.
+- Seed images are credited in `server/assets/samples/SOURCES.md`; Claude's added
+  runtime media is described in `docs/sample-media-credits.md`.
+- Real account video cover:
+  `/uploads/a0eb949d-ef6d-450b-9d2c-fe1dd5731494.webp`.
 - The original `aufd-demo/` and original workspace copy remain unchanged.
 - Credentials are never in source code or frontend variables.
 - `server/.env` is local/ignored and references the private external
@@ -62,34 +63,35 @@
 
 ## Decisions
 
-- Work-centered public portfolio, anonymous browsing.
-- One creator for this demo. `/api/creators/liurunsen` aliases `/api/portfolio`.
+- Multi-creator work-centered platform, anonymous browsing, owner-only editing.
+- `/api/portfolio` aliases lin-mo; the old personal creator route returns 404.
 - Preserve `revision`, `profile`, `works`, `videoId`, `highlights`.
 - Added computed image dimensions, safe uploads, and revision conflicts.
-- No stats, timeline, generated intro film, fake projects, or multi-user account system.
-- Local management only by default. Public deployment explicitly requires read-only
-  mode or a strong management token. Keep Vite editing servers on loopback.
+- Fictional examples must be disclosed; do not impersonate the user or real
+  creators. Do not silently change the three joined examples' server-owned flag.
+- No stats, timeline, generated intro film, admin UI or password recovery.
+- Keep development servers on loopback. Public deployment needs the active
+  contract's HTTPS/origin requirements; legacy ADMIN_TOKEN grants no privileges.
 - One backend process per data directory. No distributed locking or database.
-- Tokens only for videos referenced by the saved portfolio, with exact owned,
+- Tokens only for videos referenced by saved creator video works, with exact owned,
   published video checks. Unknown encryption and upstream failures fail explicitly.
 - Public sample video is not evidence of the competition account working.
 
 ## Verification
 
-- `npm test`: 21/21 passing, including exact-VID account diagnostic validation and
-  unknown-encryption normalization.
-- `npm audit --omit=dev --json`: zero reported vulnerabilities at verification time.
-- Independent reviewer found two issues, both fixed with regression tests.
-- Actual listener: health, creator data, image HEAD and official-demo token
-  response verified. After loading the private account configuration,
-  `GET /api/health` returned `polyvConfigured=true`; the public portfolio
-  remained at revision 0 with two works.
-- `npm test`: 21/21 passing after configuration loading.
-- Both active Vite servers (5173 and 5174) proxy portfolio, creator-list, image and
-  sample-token requests successfully. Revision-conflict PUT probes returned 409
-  through both proxies and left the entire portfolio unchanged.
-- UTF-8 decoding/JSON parsing: 13 source/config/contract files checked.
-- Frontend visual acceptance and real Polyv playback: pending with frontend owners.
+- `npm.cmd test` with process-local TLS verification enabled: 32/32 pass.
+  Covers ownership, sessions, isolated persistence, revisions, private-data
+  exclusion, uploads, Polyv and remote-cover boundaries.
+- `npm.cmd run check:polyv` with the exact VID: apiVerified=true,
+  selectedVideoPublished=true, status=61, encrypted=false. Its
+  playbackVerified=false is intentional: CLI diagnostics do not inspect browsers.
+- Direct 4317 and proxy 5175: real-video playback endpoint 200 with
+  reason=unencrypted; old personal creator and poster both 404.
+- Anonymous browser: actual video seeking/seeked/playing at 2 seconds, ended at
+  5.08 seconds, error=null, readyState=4, zero broken images. The only console
+  errors were expected unauthenticated `/api/auth/me` 401 responses.
+- Final backend record separates automated tests, independent browser evidence,
+  Claude-reported authoring workflow and still-pending human acceptance.
 
 ## Durable Debug Findings
 
